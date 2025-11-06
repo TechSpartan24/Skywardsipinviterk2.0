@@ -13,7 +13,6 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass
-from getpass import getpass
 from typing import Iterable, List, Optional, Sequence
 
 import requests
@@ -104,31 +103,25 @@ class VRChatError(RuntimeError):
 class Credentials:
     username: str
     password: str
-
-
-def _prompt_non_empty(prompt: str, *, secret: bool = False) -> str:
-    """Prompt the user until a non-empty response is entered."""
-
-    while True:
-        value = getpass(prompt) if secret else input(prompt)
-        value = value.strip()
-        if value:
-            return value
-        print("A value is required. Please try again.")
-
+    two_factor: Optional[str] = None
 
 def load_credentials() -> Credentials:
-    """Interactively collect VRChat credentials from the user."""
+    """Load credentials from environment variables or prompt the user."""
 
-    username = _prompt_non_empty("VRChat username: ")
-    password = _prompt_non_empty("VRChat password: ", secret=True)
-    return Credentials(username=username, password=password)
+    username = os.getenv("VRCHAT_USERNAME") or input("VRChat username: ")
+    password = os.getenv("VRCHAT_PASSWORD") or input("VRChat password: ")
+    two_factor = os.getenv("VRCHAT_2FA") or input("2FA/OTP (press enter if none): ")
+    if not two_factor:
+        two_factor = None
+    return Credentials(username=username, password=password, two_factor=two_factor)
 
 
 def create_session(creds: Credentials) -> requests.Session:
     session = requests.Session()
     session.headers["User-Agent"] = "skywards-auto-inviter/2.0"
     session.auth = (creds.username, creds.password)
+    if creds.two_factor:
+        session.headers["X-Auth-Authorization"] = creds.two_factor
     return session
 
 
@@ -199,66 +192,6 @@ def get_current_user(session: requests.Session) -> dict:
     if "username" not in data:
         raise VRChatError("Unable to authenticate with supplied credentials.")
     return data
-
-
-TWO_FACTOR_ENDPOINTS = {
-    "totp": f"{API_ROOT}/auth/twofactorauth/totp/verify",
-    "otp": f"{API_ROOT}/auth/twofactorauth/emailotp/verify",
-    "emailotp": f"{API_ROOT}/auth/twofactorauth/emailotp/verify",
-}
-
-MAX_TWO_FACTOR_ATTEMPTS = 3
-
-
-def _prompt_two_factor_code(method: str) -> str:
-    prompt = "Enter two-factor code: "
-    if method == "totp":
-        prompt = "Enter authenticator app code: "
-    elif method in {"otp", "emailotp"}:
-        prompt = "Enter email verification code: "
-    return _prompt_non_empty(prompt, secret=True)
-
-
-def verify_two_factor(session: requests.Session, methods: Sequence[str]) -> None:
-    """Prompt for and verify a supported two-factor authentication method."""
-
-    supported_methods = [m for m in (method.lower() for method in methods) if m in TWO_FACTOR_ENDPOINTS]
-    if not supported_methods:
-        raise VRChatError(
-            "Two-factor authentication is required but no supported verification methods were provided."
-        )
-
-    for method in supported_methods:
-        endpoint = TWO_FACTOR_ENDPOINTS[method]
-        for attempt in range(1, MAX_TWO_FACTOR_ATTEMPTS + 1):
-            code = _prompt_two_factor_code(method)
-            payload = {"code": code, "rememberDevice": False}
-            try:
-                resp = perform_request(session, "POST", endpoint, json=payload)
-                _handle_response(resp)
-            except VRChatError as exc:
-                if attempt >= MAX_TWO_FACTOR_ATTEMPTS:
-                    raise VRChatError(
-                        "Failed to verify two-factor authentication code after multiple attempts."
-                    ) from exc
-                print("Two-factor verification failed. Please try again.")
-                continue
-            else:
-                print("Two-factor verification successful.")
-                return
-
-    raise VRChatError("Unable to verify two-factor authentication for any provided method.")
-
-
-def ensure_authenticated(session: requests.Session) -> dict:
-    """Fetch the current user, prompting for 2FA if required."""
-
-    user = get_current_user(session)
-    required_methods = user.get("requiresTwoFactorAuth")
-    if isinstance(required_methods, Sequence) and not isinstance(required_methods, (str, bytes)) and required_methods:
-        verify_two_factor(session, required_methods)
-        user = get_current_user(session)
-    return user
 
 
 def get_group(session: requests.Session, group_id: str) -> dict:
@@ -348,7 +281,7 @@ def main(argv: Sequence[str]) -> int:
     session = create_session(creds)
 
     print("Authenticating with VRChat API…")
-    user = ensure_authenticated(session)
+    user = get_current_user(session)
     print(f"Authenticated as {user['displayName']} ({user['id']})")
 
     print("Fetching group details…")

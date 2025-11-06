@@ -11,17 +11,23 @@ group while skipping people who are already members.
 
 ## Usage
 
-1. Run the inviter with your desired group ID:
+1. Export your VRChat credentials to environment variables (recommended):
+
+   ```bash
+   export VRCHAT_USERNAME="your_username"
+   export VRCHAT_PASSWORD="your_password"
+   export VRCHAT_2FA="123456"  # optional one-time password if you use 2FA
+   ```
+
+   If you prefer, the script will prompt for anything that is missing.
+
+2. Run the inviter with your desired group ID:
 
    ```bash
    python inviter.py <group_id>
    ```
 
-2. Enter your VRChat username and password when prompted. If your account uses
-   two-factor authentication (TOTP or email codes), the script will ask for the
-   code and verify it before proceeding.
-
-3. After authentication, the script will:
+   The script will:
 
    * Authenticate with VRChat.
    * Pull the current group membership and write the user IDs to a temporary
@@ -31,7 +37,7 @@ group while skipping people who are already members.
    * Compute the difference between the lists and invite only friends who are
      not already in the group.
 
-4. When the script finishes it prints the locations of the two JSON files it
+3. When the script finishes it prints the locations of the two JSON files it
    created so you can inspect or archive them if desired.
 
 > **Important**: This script calls the unofficial VRChat API and is provided for
